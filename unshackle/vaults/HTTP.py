@@ -30,7 +30,7 @@ class HTTP(Vault):
             api_mode: "query" for query parameters or "json" for JSON API
         """
         super().__init__(name)
-        self.url = host.rstrip("/")
+        self.url = host
         self.password = password
         self.username = username
         self.api_mode = api_mode.lower()
