@@ -69,7 +69,7 @@ class Netflix(Service):
                   default="widevine",
                   help="which drm system to use")
     @click.option("-p", "--profile", type=click.Choice(["MPL", "HPL", "QC", "MPL+HPL", "MPL+HPL+QC", "MPL+QC"], case_sensitive=False),
-                  default="MPL+HPL+QC",
+                  default=None,
                   help="H.264 profile to use. Default is best available.")
     @click.option("--meta-lang", type=str, help="Language to use for metadata")
     @click.option("-ht","--hydrate-track", is_flag=True, default=False, help="Hydrate missing audio and subtitle.")
@@ -89,6 +89,7 @@ class Netflix(Service):
         self.profiles: List[str] = []
         self.requested_profiles: List[str] = []
         self.high_bitrate = high_bitrate
+        
         # MSL
         self.esn = self.cache.get("ESN")
         self.msl: Optional[MSL] = None
@@ -162,43 +163,29 @@ class Netflix(Service):
 
     def get_tracks(self, title: Title_T) -> Tracks:
        
-        self.log.debug(f"Requested profiles: {self.profiles}")
-        # self.log.info(f"Quality: {self.quality}")
-        # if 720 in self.quality:
-        #     # self.log.info(f"Getting 720 quality")
-        #     profile = [x for x in profile if "l40" not in x]
-        # self.log.debug(f"Profiles: {self.profiles}")
         tracks = Tracks()
         
-        
-        
         # If Video Codec is H.264 is selected but `self.profile is none` profile QC has to be requested seperately
-        # if self.vcodec == Video.Codec.AVC and 'QC' in self.profile:
-        #     qc_720_profile = [x for x in self.config["profiles"]["video"][self.vcodec.extension.upper()]["QC"] if "l40" not in x and 720 in self.quality]
-        #     qc_manifest = self.get_manifest(title, qc_720_profile if 720 in self.quality else self.config["profiles"]["video"][self.vcodec.extension.upper()]["QC"])
-        #     qc_tracks = self.manifest_as_tracks(qc_manifest, title, False)
-        #     movie_track.add(qc_tracks.videos)
-        
-        # if self.vcodec == Video.Codec.AVC:
-        #     mpl_manifest = self.get_manifest(title, [x for x in self.config["profiles"]["video"][self.vcodec.extension.upper()]["MPL"] if "l40" not in x])
-        #     mpl_tracks = self.manifest_as_tracks(mpl_manifest, title, False)
-        #     movie_track.add(mpl_tracks.videos)
-        
         if self.vcodec == Video.Codec.AVC:
-            
-            manifest = self.get_manifest(title, self.profiles)
-            movie_track = self.manifest_as_tracks(manifest, title, self.hydrate_track)
-            tracks.add(movie_track)
+            # self.log.info(f"Profile: {self.profile}")
+            try:
+                manifest = self.get_manifest(title, self.profiles)
+                movie_track = self.manifest_as_tracks(manifest, title, self.hydrate_track)
+                tracks.add(movie_track)
 
-            qc_720_profile = [x for x in self.config["profiles"]["video"][self.vcodec.extension.upper()]["QC"] if "l40" not in x and 720 in self.quality]
-            qc_manifest = self.get_manifest(title, qc_720_profile if 720 in self.quality else self.config["profiles"]["video"][self.vcodec.extension.upper()]["QC"])
-            qc_tracks = self.manifest_as_tracks(qc_manifest, title, False)
-            tracks.add(qc_tracks.videos)
+                if self.profile is not None:
+                    self.log.info(f"Requested profiles: {self.profile}")
+                else:
+                    qc_720_profile = [x for x in self.config["profiles"]["video"][self.vcodec.extension.upper()]["QC"] if "l40" not in x and 720 in self.quality]
+                    qc_manifest = self.get_manifest(title, qc_720_profile if 720 in self.quality else self.config["profiles"]["video"][self.vcodec.extension.upper()]["QC"])
+                    qc_tracks = self.manifest_as_tracks(qc_manifest, title, False)
+                    tracks.add(qc_tracks.videos)
 
-            mpl_manifest = self.get_manifest(title, [x for x in self.config["profiles"]["video"][self.vcodec.extension.upper()]["MPL"] if "l40" not in x])
-            mpl_tracks = self.manifest_as_tracks(mpl_manifest, title, False)
-            tracks.add(mpl_tracks.videos)
-            pass
+                    mpl_manifest = self.get_manifest(title, [x for x in self.config["profiles"]["video"][self.vcodec.extension.upper()]["MPL"] if "l40" not in x])
+                    mpl_tracks = self.manifest_as_tracks(mpl_manifest, title, False)
+                    tracks.add(mpl_tracks.videos)
+            except Exception as e:
+                self.log.error(e)
         else:
             if self.high_bitrate:
                 splitted_profiles = self.split_profiles(self.profiles)
@@ -212,20 +199,26 @@ class Netflix(Service):
                         self.log.error(f"Error getting profile: {profile_list}. Skipping")
                         continue
             else:
-                manifest = self.get_manifest(title, self.profiles)
-                manifest_tracks = self.manifest_as_tracks(manifest, title, self.hydrate_track)
-                tracks.add(manifest_tracks)
-            pass
+                try:
+                    manifest = self.get_manifest(title, self.profiles)
+                    manifest_tracks = self.manifest_as_tracks(manifest, title, self.hydrate_track)
+                    tracks.add(manifest_tracks)
+                except Exception as e:
+                    self.log.error(e)
 
 
             
         # Add Attachments for profile picture
-        # movie_track.add(
-        #     Attachment(
-        #         url=title.data["boxart"][0]["url"],
-        #         name="Poster"
-        #     )
-        # )
+        if isinstance(title, Movie):
+            tracks.add(
+                Attachment.from_url(
+                    url=title.data["boxart"][0]["url"]
+                )
+            )
+        else:
+            tracks.add(
+                Attachment.from_url(title.data["stills"][0]["url"])
+            )
         
         return tracks
         
@@ -340,7 +333,7 @@ class Netflix(Service):
 
         if self.profile is not None:
             self.requested_profiles = self.profile.split('+')
-            # self.log.info(f"Requested profile: {self.requested_profiles}")
+            self.log.info(f"Requested profile: {self.requested_profiles}")
         else:
             # self.log.info(f"Video Range: {self.range}")
             self.requested_profiles = self.config["profiles"]["video"][self.vcodec.extension.upper()]
@@ -361,8 +354,6 @@ class Netflix(Service):
             sys.exit(1)
 
         self.profiles = self.get_profiles()
-        
-        # self.profiles = self.config["profiles"]["video"][self.vcodec.extension.upper()]
         self.log.info("Intializing a MSL client")
         self.get_esn()
         scheme = KeyExchangeSchemes.AsymmetricWrapped
@@ -387,6 +378,11 @@ class Netflix(Service):
         result_profiles = []
 
         if self.vcodec == Video.Codec.AVC:
+            if self.requested_profiles is not None:
+                for requested_profiles in self.requested_profiles:
+                    result_profiles.extend(flatten(list(self.config["profiles"]["video"][self.vcodec.extension.upper()][requested_profiles])))
+                return result_profiles
+                
             result_profiles.extend(flatten(list(self.config["profiles"]["video"][self.vcodec.extension.upper()].values())))
             return result_profiles
 
@@ -408,15 +404,12 @@ class Netflix(Service):
         # Check if ESN is expired or doesn't exist
         if self.esn.data is None or self.esn.data == {} or (hasattr(self.esn, 'expired') and self.esn.expired):
             # Set new ESN with 6-hour expiration
-            self.log.info(f"Generated new ESN with 6-hour expiration: {self.esn.data}")
             self.esn.set(esn_value, 6 * 60 * 60)  # 6 hours in seconds
+            self.log.info(f"Generated new ESN with 6-hour expiration")
         else:
             self.log.info(f"Using cached ESN.")
         self.log.info(f"ESN: {self.esn.data}")
 
-
-        # with open(web_data, encoding="utf-8") as fd:
-        #     return jsonpickle.decode(fd.read())
 
     def get_metadata(self, title_id: str):
         """
