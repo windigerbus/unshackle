@@ -24,6 +24,8 @@ unshackle/certs/
 unshackle/WVDs/
 unshackle/PRDs/
 temp/
+Cache/
+Temp/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
