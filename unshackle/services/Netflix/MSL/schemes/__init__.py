@@ -22,3 +22,4 @@ class KeyExchangeSchemes(Scheme):
     """https://github.com/Netflix/msl/wiki/Key-Exchange-%28Configuration%29"""
     AsymmetricWrapped = "ASYMMETRIC_WRAPPED"
     Widevine = "WIDEVINE"
+    DiffieHellman = "DH"

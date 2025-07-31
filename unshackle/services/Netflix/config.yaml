@@ -28,6 +28,10 @@ configuration:
   supported_hdcp_versions: ["2.2"] # 720p-max: 1.4, chrome: empty, 4k: 2.2
   is_hdcp_engaged: true # chrome: false
 
+keys:
+  kenc: "5VMBpSpvyiwQPdaZ99PX6Q=="
+  khmac: "u8ldDaWPL7kFW7hkc84/QN4yDxnbeHAw13Uk7uu50EE="
+
 profiles:
   video:
     H264:

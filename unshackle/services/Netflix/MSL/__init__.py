@@ -10,6 +10,7 @@ import time
 import zlib
 from datetime import datetime
 from io import BytesIO
+from typing import Optional
 
 import jsonpickle
 import requests
@@ -26,6 +27,7 @@ from .schemes import EntityAuthenticationSchemes  # noqa: F401
 from .schemes import KeyExchangeSchemes
 from .schemes.EntityAuthentication import EntityAuthentication
 from .schemes.KeyExchangeRequest import KeyExchangeRequest
+from .schemes.DiffieHellman import DiffieHellman
 # from vinetrimmer.utils.widevine.device import RemoteDevice
 
 class MSL:
@@ -40,7 +42,7 @@ class MSL:
         self.message_id = message_id
 
     @classmethod
-    def handshake(cls, scheme: KeyExchangeSchemes, session: requests.Session, endpoint: str, sender: str, cache: Cacher):
+    def handshake(cls, scheme: KeyExchangeSchemes, session: requests.Session, endpoint: str, sender: str, cache: Cacher, kenc: Optional[bytes] = None, khmac: Optional[bytes] = None):
         cache = cache.get(sender)
         message_id = random.randint(0, pow(2, 52))
         msl_keys = MSL.load_cache_data(cache)
@@ -49,32 +51,32 @@ class MSL:
             cls.log.info("Using cached MSL data")
         else:
             msl_keys = MSLKeys()
-            if scheme != KeyExchangeSchemes.Widevine:
+            if scheme == KeyExchangeSchemes.DiffieHellman:
+                # For DH scheme, we don't need RSA keys
+                dh_exchange = DiffieHellman.KeyExchangeRequest()
+                keyrequestdata = {
+                    "scheme": str(scheme),
+                    "keydata": dh_exchange.keydata
+                }
+            elif scheme != KeyExchangeSchemes.Widevine:
                 msl_keys.rsa = RSA.generate(2048)
+                keyrequestdata = KeyExchangeRequest.AsymmetricWrapped(
+                    keypairid="superKeyPair",
+                    mechanism="JWK_RSA",
+                    publickey=msl_keys.rsa.publickey().exportKey(format="DER")
+                )
+            else:
+                # For other schemes, create appropriate key request data
+                keyrequestdata = KeyExchangeRequest.AsymmetricWrapped(
+                    keypairid="superKeyPair",
+                    mechanism="JWK_RSA",
+                    publickey=msl_keys.rsa.publickey().exportKey(format="DER")
+                )
 
-            # if not cdm:
-            #     raise cls.log.exit("- No cached data and no CDM specified")
-
-            # if not msl_keys_path:
-            #     raise cls.log.exit("- No cached data and no MSL key path specified")
-
-            # Key Exchange Scheme Widevine currently not implemented
-            # if scheme == KeyExchangeSchemes.Widevine:
-            #     msl_keys.cdm_session = cdm.open(
-            #         pssh=b"\x0A\x7A\x00\x6C\x38\x2B",
-            #         raw=True,
-            #         offline=True
-            #     )
-            #     keyrequestdata = KeyExchangeRequest.Widevine(
-            #         keyrequest=cdm.get_license_challenge(msl_keys.cdm_session)
-            #     )
-            # else:
-            keyrequestdata = KeyExchangeRequest.AsymmetricWrapped(
-                keypairid="superKeyPair",
-                mechanism="JWK_RSA",
-                publickey=msl_keys.rsa.publickey().exportKey(format="DER")
-            )
-
+            # For DH scheme, we need to store the exchange object to derive keys later
+            if scheme == KeyExchangeSchemes.DiffieHellman:
+                dh_request = dh_exchange
+                
             data = jsonpickle.encode({
                 "entityauthdata": EntityAuthentication.Unauthenticated(sender),
                 "headerdata": base64.b64encode(MSL.generate_msg_header(
@@ -105,9 +107,11 @@ class MSL:
 
             key_exchange = r.json()  # expecting no payloads, so this is fine
             if "errordata" in key_exchange:
-                raise cls.log.exit("- Key exchange failed: " + json.loads(base64.b64decode(
+                message = "- Key exchange failed: " + json.loads(base64.b64decode(
                     key_exchange["errordata"]
-                ).decode())["errormsg"])
+                ).decode())["errormsg"]
+                cls.log.error(message)
+                raise Exception(message)
 
             # parse the crypto keys
             key_response_data = json.JSONDecoder().decode(base64.b64decode(
@@ -118,40 +122,69 @@ class MSL:
                 raise cls.log.exit("- Key exchange scheme mismatch occurred")
 
             key_data = key_response_data["keydata"]
-            # if scheme == KeyExchangeSchemes.Widevine:
-            #     if isinstance(cdm.device, RemoteDevice):
-            #         msl_keys.encryption, msl_keys.sign = cdm.device.exchange(
-            #             cdm.sessions[msl_keys.cdm_session],
-            #             license_res=key_data["cdmkeyresponse"],
-            #             enc_key_id=base64.b64decode(key_data["encryptionkeyid"]),
-            #             hmac_key_id=base64.b64decode(key_data["hmackeyid"])
-            #         )
-            #         cdm.parse_license(msl_keys.cdm_session, key_data["cdmkeyresponse"])
-            #     else:
-            #         cdm.parse_license(msl_keys.cdm_session, key_data["cdmkeyresponse"])
-            #         keys = cdm.get_keys(msl_keys.cdm_session)
-            #         msl_keys.encryption = MSL.get_widevine_key(
-            #             kid=base64.b64decode(key_data["encryptionkeyid"]),
-            #             keys=keys,
-            #             permissions=["AllowEncrypt", "AllowDecrypt"]
-            #         )
-            #         msl_keys.sign = MSL.get_widevine_key(
-            #             kid=base64.b64decode(key_data["hmackeyid"]),
-            #             keys=keys,
-            #             permissions=["AllowSign", "AllowSignatureVerify"]
-            #         )
-            # else:
-            cipher_rsa = PKCS1_OAEP.new(msl_keys.rsa)
-            msl_keys.encryption = MSL.base64key_decode(
-                json.JSONDecoder().decode(cipher_rsa.decrypt(
-                    base64.b64decode(key_data["encryptionkey"])
-                ).decode("utf-8"))["k"]
-            )
-            msl_keys.sign = MSL.base64key_decode(
-                json.JSONDecoder().decode(cipher_rsa.decrypt(
-                    base64.b64decode(key_data["hmackey"])
-                ).decode("utf-8"))["k"]
-            )
+
+            # Handle DH scheme key derivation
+            if scheme == KeyExchangeSchemes.DiffieHellman:
+                # Complete the DH exchange to derive keys
+                try:
+                    # Decode the response public key
+                    response_public_bytes = base64.b64decode(key_data["publickey"])
+                    response_public_key = DiffieHellman.decode_public_key(response_public_bytes)
+                    
+                    # Complete the key exchange
+                    shared_secret = dh_request._private_key.exchange(response_public_key)
+                    dh_request._shared_secret = shared_secret
+                    
+                    # Derive session keys
+                    kenc, khmac = dh_request.derive_keys()
+                    
+                    # Use derived keys for encryption and signing
+                    msl_keys.encryption = kenc
+                    msl_keys.sign = khmac
+                    # Store the DH exchange object for potential future use
+                    msl_keys.dh_exchange = dh_request
+                except Exception as e:
+                    raise cls.log.exit(f"- DH key exchange failed: {str(e)}")
+            # Handle custom Kenc/Khmac parameters
+            elif kenc is not None and khmac is not None:
+                msl_keys.encryption = kenc
+                msl_keys.sign = khmac
+            # Handle standard RSA-based schemes
+            elif scheme != KeyExchangeSchemes.DiffieHellman:
+                # if scheme == KeyExchangeSchemes.Widevine:
+                #     if isinstance(cdm.device, RemoteDevice):
+                #         msl_keys.encryption, msl_keys.sign = cdm.device.exchange(
+                #             cdm.sessions[msl_keys.cdm_session],
+                #             license_res=key_data["cdmkeyresponse"],
+                #             enc_key_id=base64.b64decode(key_data["encryptionkeyid"]),
+                #             hmac_key_id=base64.b64decode(key_data["hmackeyid"])
+                #         )
+                #         cdm.parse_license(msl_keys.cdm_session, key_data["cdmkeyresponse"])
+                #     else:
+                #         cdm.parse_license(msl_keys.cdm_session, key_data["cdmkeyresponse"])
+                #         keys = cdm.get_keys(msl_keys.cdm_session)
+                #         msl_keys.encryption = MSL.get_widevine_key(
+                #             kid=base64.b64decode(key_data["encryptionkeyid"]),
+                #             keys=keys,
+                #             permissions=["AllowEncrypt", "AllowDecrypt"]
+                #         )
+                #         msl_keys.sign = MSL.get_widevine_key(
+                #             kid=base64.b64decode(key_data["hmackeyid"]),
+                #             keys=keys,
+                #             permissions=["AllowSign", "AllowSignatureVerify"]
+                #         )
+                # else:
+                cipher_rsa = PKCS1_OAEP.new(msl_keys.rsa)
+                msl_keys.encryption = MSL.base64key_decode(
+                    json.JSONDecoder().decode(cipher_rsa.decrypt(
+                        base64.b64decode(key_data["encryptionkey"])
+                    ).decode("utf-8"))["k"]
+                )
+                msl_keys.sign = MSL.base64key_decode(
+                    json.JSONDecoder().decode(cipher_rsa.decrypt(
+                        base64.b64decode(key_data["hmackey"])
+                    ).decode("utf-8"))["k"]
+                )
             msl_keys.mastertoken = key_response_data["mastertoken"]
 
             MSL.cache_keys(msl_keys, cache)
@@ -187,6 +220,10 @@ class MSL:
     @staticmethod
     def cache_keys(msl_keys, cache: Cacher):
         # os.makedirs(os.path.dirname(cache), exist_ok=True)
+        # Store DH exchange temporarily to exclude from caching
+        temp_dh_exchange = msl_keys.dh_exchange
+        msl_keys.dh_exchange = None
+        
         if msl_keys.rsa:
             # jsonpickle can't pickle RsaKey objects :(
             msl_keys.rsa = msl_keys.rsa.export_key()
@@ -196,6 +233,9 @@ class MSL:
         if msl_keys.rsa:
             # re-import now
             msl_keys.rsa = RSA.importKey(msl_keys.rsa)
+            
+        # Restore DH exchange
+        msl_keys.dh_exchange = temp_dh_exchange
 
     @staticmethod
     def generate_msg_header(message_id, sender, is_handshake, userauthdata=None, keyrequestdata=None,

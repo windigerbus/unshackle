@@ -3,6 +3,7 @@ from datetime import datetime
 import json
 from math import e
 
+from pathlib import Path
 import random
 import sys
 import time
@@ -365,7 +366,9 @@ class Netflix(Service):
             session=self.session,
             endpoint=self.config["endpoints"]["manifest"],
             sender=self.esn.data,
-            cache=self.cache.get("MSL")
+            cache=self.cache.get("MSL"),
+            # kenc=self.config["keys"]["kenc"],
+            # khmac=self.config["keys"]["khmac"]
         )
         cookie = self.session.cookies.get_dict()
         self.userauthdata = UserAuthentication.NetflixIDCookies(
@@ -401,6 +404,11 @@ class Netflix(Service):
     def get_esn(self):
         ESN_GEN = "".join(random.choice("0123456789ABCDEF") for _ in range(30))
         esn_value = f"NFCDIE-03-{ESN_GEN}"
+        path = Path(".esn")
+        if path.exists():
+            esn = open(path).read()
+            self.esn.set(esn)
+            return
         # Check if ESN is expired or doesn't exist
         if self.esn.data is None or self.esn.data == {} or (hasattr(self.esn, 'expired') and self.esn.expired):
             # Set new ESN with 6-hour expiration
