@@ -404,7 +404,7 @@ class Netflix(Service):
         # Check if ESN is expired or doesn't exist
         if self.esn.data is None or self.esn.data == {} or (hasattr(self.esn, 'expired') and self.esn.expired):
             # Set new ESN with 6-hour expiration
-            self.esn.set(esn_value, 1 * 60 * 60)  # 6 hours in seconds
+            self.esn.set(esn_value, 1 * 60 * 60)  # 1 hours in seconds
             self.log.info(f"Generated new ESN with 1-hour expiration")
         else:
             self.log.info(f"Using cached ESN.")
