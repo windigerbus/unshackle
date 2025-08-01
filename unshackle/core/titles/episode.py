@@ -95,13 +95,13 @@ class Episode(Title):
         # Title [Year] SXXEXX Name (or Title [Year] SXX if folder)
         if folder:
             name = f"{self.title}"
-            if self.year:
-                name += f" {self.year}"
-            name += f" S{self.season:02}"
+            # if self.year:
+            #     name += f" ({self.year})"
+            name += f"/Season {self.season:02}"
+            return name
         else:
-            name = "{title}{year} S{season:02}E{number:02} {name}".format(
+            name = "{title} S{season:02}E{number:02} {name} -".format(
                 title=self.title.replace("$", "S"),  # e.g., Arli$$
-                year=f" {self.year}" if self.year else "",
                 season=self.season,
                 number=self.number,
                 name=self.name or "",
@@ -125,19 +125,19 @@ class Episode(Title):
             name += f" {resolution}p"
 
         # Service
-        if show_service:
-            name += f" {self.service.__name__}"
+        # if show_service:
+        #     name += f" {self.service.__name__}"
 
-        # 'WEB-DL'
-        name += " WEB-DL"
+        # # 'WEB-DL'
+        # name += " WEB-DL"
 
-        # DUAL
-        if unique_audio_languages == 2:
-            name += " DUAL"
+        # # DUAL
+        # if unique_audio_languages == 2:
+        #     name += " DUAL"
 
-        # MULTi
-        if unique_audio_languages > 2:
-            name += " MULTi"
+        # # MULTi
+        # if unique_audio_languages > 2:
+        #     name += " MULTi"
 
         # Audio Codec + Channels (+ feature)
         if primary_audio_track:
@@ -172,8 +172,8 @@ class Episode(Title):
                 name += " HFR"
             name += f" {VIDEO_CODEC_MAP.get(codec, codec)}"
 
-        if config.tag:
-            name += f"-{config.tag}"
+        # if config.tag:
+        #     name += f"-{config.tag}"
 
         return sanitize_filename(name)
 
