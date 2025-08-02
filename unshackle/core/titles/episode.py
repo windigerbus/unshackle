@@ -104,7 +104,7 @@ class Episode(Title):
                 title=self.title.replace("$", "S"),  # e.g., Arli$$
                 season=self.season,
                 number=self.number,
-                name=self.name or "",
+                name=self.name or f"Episode {self.number:02}",
             ).strip()
 
         # Resolution
