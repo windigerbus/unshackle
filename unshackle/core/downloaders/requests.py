@@ -16,7 +16,7 @@ from unshackle.core.utilities import get_extension
 
 MAX_ATTEMPTS = 5
 RETRY_WAIT = 2
-CHUNK_SIZE = 512
+CHUNK_SIZE = 1024
 PROGRESS_WINDOW = 5
 
 DOWNLOAD_SIZES = []
