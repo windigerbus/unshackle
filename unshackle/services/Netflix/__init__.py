@@ -436,7 +436,9 @@ class Netflix(Service):
                     "isShortformEnabled": False,
                     "languages": self.meta_lang
                 }
-            ).json()
+            )
+            self.log.info(f"Getting {int(title_id)}")
+            metadata=metadata.json()
         except requests.HTTPError as e:
             if e.response.status_code == 500:
                 self.log.warning(
@@ -448,6 +450,9 @@ class Netflix(Service):
             raise Exception(f"Error getting metadata: {e}")
         except json.JSONDecodeError:
             self.log.error(" - Failed to get metadata, title might not be available in your region.")
+            sys.exit(1)
+        except ValueError:
+            self.log.error(" - Make sure you're using a title ID e.g. 81046193 (not a link!)")
             sys.exit(1)
         else:
             if "status" in metadata and metadata["status"] == "error":
