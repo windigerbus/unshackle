@@ -75,9 +75,28 @@ class Config:
         self.proxy_providers: dict = kwargs.get("proxy_providers") or {}
         self.serve: dict = kwargs.get("serve") or {}
         self.services: dict = kwargs.get("services") or {}
+        decryption_cfg = kwargs.get("decryption") or {}
+        if isinstance(decryption_cfg, dict):
+            self.decryption_map = {k.upper(): v for k, v in decryption_cfg.items()}
+            self.decryption = self.decryption_map.get("DEFAULT", "shaka")
+        else:
+            self.decryption_map = {}
+            self.decryption = decryption_cfg or "shaka"
+
         self.set_terminal_bg: bool = kwargs.get("set_terminal_bg", False)
         self.tag: str = kwargs.get("tag") or ""
+        self.tag_group_name: bool = kwargs.get("tag_group_name", True)
+        self.tag_imdb_tmdb: bool = kwargs.get("tag_imdb_tmdb", True)
         self.tmdb_api_key: str = kwargs.get("tmdb_api_key") or ""
+        self.decrypt_labs_api_key: str = kwargs.get("decrypt_labs_api_key") or ""
+        self.update_checks: bool = kwargs.get("update_checks", True)
+        self.update_check_interval: int = kwargs.get("update_check_interval", 24)
+        self.scene_naming: bool = kwargs.get("scene_naming", True)
+        self.series_year: bool = kwargs.get("series_year", True)
+
+        self.title_cache_time: int = kwargs.get("title_cache_time", 1800)  # 30 minutes default
+        self.title_cache_max_retention: int = kwargs.get("title_cache_max_retention", 86400)  # 24 hours default
+        self.title_cache_enabled: bool = kwargs.get("title_cache_enabled", True)
 
     @classmethod
     def from_yaml(cls, path: Path) -> Config:

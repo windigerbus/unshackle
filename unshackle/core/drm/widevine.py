@@ -185,7 +185,15 @@ class Widevine:
                 if cert and hasattr(cdm, "set_service_certificate"):
                     cdm.set_service_certificate(session_id, cert)
 
-                cdm.parse_license(session_id, licence(challenge=cdm.get_license_challenge(session_id, self.pssh)))
+                if hasattr(cdm, "set_required_kids"):
+                    cdm.set_required_kids(self.kids)
+
+                challenge = cdm.get_license_challenge(session_id, self.pssh)
+
+                if hasattr(cdm, "has_cached_keys") and cdm.has_cached_keys(session_id):
+                    pass
+                else:
+                    cdm.parse_license(session_id, licence(challenge=challenge))
 
                 self.content_keys = {key.kid: key.key.hex() for key in cdm.get_keys(session_id, "CONTENT")}
                 if not self.content_keys:
@@ -213,10 +221,18 @@ class Widevine:
                 if cert and hasattr(cdm, "set_service_certificate"):
                     cdm.set_service_certificate(session_id, cert)
 
-                cdm.parse_license(
-                    session_id,
-                    licence(session_id=session_id, challenge=cdm.get_license_challenge(session_id, self.pssh)),
-                )
+                if hasattr(cdm, "set_required_kids"):
+                    cdm.set_required_kids(self.kids)
+
+                challenge = cdm.get_license_challenge(session_id, self.pssh)
+
+                if hasattr(cdm, "has_cached_keys") and cdm.has_cached_keys(session_id):
+                    pass
+                else:
+                    cdm.parse_license(
+                        session_id,
+                        licence(session_id=session_id, challenge=challenge),
+                    )
 
                 self.content_keys = {key.kid: key.key.hex() for key in cdm.get_keys(session_id, "CONTENT")}
                 if not self.content_keys:
@@ -230,18 +246,66 @@ class Widevine:
     def decrypt(self, path: Path) -> None:
         """
         Decrypt a Track with Widevine DRM.
+        Args:
+            path: Path to the encrypted file to decrypt
         Raises:
-            EnvironmentError if the Shaka Packager executable could not be found.
+            EnvironmentError if the required decryption executable could not be found.
             ValueError if the track has not yet been downloaded.
-            SubprocessError if Shaka Packager returned a non-zero exit code.
+            SubprocessError if the decryption process returned a non-zero exit code.
         """
         if not self.content_keys:
             raise ValueError("Cannot decrypt a Track without any Content Keys...")
 
-        if not binaries.ShakaPackager:
-            raise EnvironmentError("Shaka Packager executable not found but is required.")
         if not path or not path.exists():
             raise ValueError("Tried to decrypt a file that does not exist.")
+
+        decrypter = str(getattr(config, "decryption", "")).lower()
+
+        if decrypter == "mp4decrypt":
+            return self._decrypt_with_mp4decrypt(path)
+        else:
+            return self._decrypt_with_shaka_packager(path)
+
+    def _decrypt_with_mp4decrypt(self, path: Path) -> None:
+        """Decrypt using mp4decrypt"""
+        if not binaries.Mp4decrypt:
+            raise EnvironmentError("mp4decrypt executable not found but is required.")
+
+        output_path = path.with_stem(f"{path.stem}_decrypted")
+
+        # Build key arguments
+        key_args = []
+        for kid, key in self.content_keys.items():
+            kid_hex = kid.hex if hasattr(kid, "hex") else str(kid).replace("-", "")
+            key_hex = key if isinstance(key, str) else key.hex()
+            key_args.extend(["--key", f"{kid_hex}:{key_hex}"])
+
+        cmd = [
+            str(binaries.Mp4decrypt),
+            "--show-progress",
+            *key_args,
+            str(path),
+            str(output_path),
+        ]
+
+        try:
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        except subprocess.CalledProcessError as e:
+            error_msg = e.stderr if e.stderr else f"mp4decrypt failed with exit code {e.returncode}"
+            raise subprocess.CalledProcessError(e.returncode, cmd, output=e.stdout, stderr=error_msg)
+
+        if not output_path.exists():
+            raise RuntimeError(f"mp4decrypt failed: output file {output_path} was not created")
+        if output_path.stat().st_size == 0:
+            raise RuntimeError(f"mp4decrypt failed: output file {output_path} is empty")
+
+        path.unlink()
+        shutil.move(output_path, path)
+
+    def _decrypt_with_shaka_packager(self, path: Path) -> None:
+        """Decrypt using Shaka Packager (original method)"""
+        if not binaries.ShakaPackager:
+            raise EnvironmentError("Shaka Packager executable not found but is required.")
 
         output_path = path.with_stem(f"{path.stem}_decrypted")
         config.directories.temp.mkdir(parents=True, exist_ok=True)

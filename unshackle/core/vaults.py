@@ -25,8 +25,20 @@ class Vaults:
     def __len__(self) -> int:
         return len(self.vaults)
 
-    def load(self, type_: str, **kwargs: Any) -> None:
-        """Load a Vault into the vaults list."""
+    def load(self, type_: str, **kwargs: Any) -> bool:
+        """Load a Vault into the vaults list. Returns True if successful, False otherwise."""
+        module = _MODULES.get(type_)
+        if not module:
+            raise ValueError(f"Unable to find vault command by the name '{type_}'.")
+        try:
+            vault = module(**kwargs)
+            self.vaults.append(vault)
+            return True
+        except Exception:
+            return False
+
+    def load_critical(self, type_: str, **kwargs: Any) -> None:
+        """Load a critical Vault that must succeed or raise an exception."""
         module = _MODULES.get(type_)
         if not module:
             raise ValueError(f"Unable to find vault command by the name '{type_}'.")
@@ -45,7 +57,7 @@ class Vaults:
         """Add a KID:KEY to all Vaults, optionally with an exclusion."""
         success = 0
         for vault in self.vaults:
-            if vault != excluding:
+            if vault != excluding and not vault.no_push:
                 try:
                     success += vault.add_key(self.service, kid, key)
                 except (PermissionError, NotImplementedError):
@@ -56,13 +68,17 @@ class Vaults:
         """
         Add multiple KID:KEYs to all Vaults. Duplicate Content Keys are skipped.
         PermissionErrors when the user cannot create Tables are absorbed and ignored.
+        Vaults with no_push=True are skipped.
         """
         success = 0
         for vault in self.vaults:
-            try:
-                success += bool(vault.add_keys(self.service, kid_keys))
-            except (PermissionError, NotImplementedError):
-                pass
+            if not vault.no_push:
+                try:
+                    # Count each vault that successfully processes the keys (whether new or existing)
+                    vault.add_keys(self.service, kid_keys)
+                    success += 1
+                except (PermissionError, NotImplementedError):
+                    pass
         return success
 
 

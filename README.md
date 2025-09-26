@@ -2,6 +2,10 @@
     <img width="16" height="16" alt="no_encryption" src="https://github.com/user-attachments/assets/6ff88473-0dd2-4bbc-b1ea-c683d5d7a134" /> unshackle
     <br/>
     <sup><em>Movie, TV, and Music Archival Software</em></sup>
+    <br/>
+      <a href="https://discord.gg/mHYyPaCbFK">
+        <img src="https://img.shields.io/discord/1395571732001325127?label=&logo=discord&logoColor=ffffff&color=7289DA&labelColor=7289DA" alt="Discord">
+    </a>
 </p>
 
 ## What is unshackle?
@@ -40,45 +44,6 @@ uv run unshackle --help
 uv tool install git+https://github.com/unshackle-dl/unshackle.git
 # Then run:
 uvx unshackle --help   # or just `unshackle` once PATH updated
-```
-
-### Docker Installation
-
-Run unshackle using our pre-built Docker image from GitHub Container Registry:
-
-```bash
-# Run with default help command
-docker run --rm ghcr.io/unshackle-dl/unshackle:latest
-
-# Check environment dependencies
-docker run --rm ghcr.io/unshackle-dl/unshackle:latest env check
-
-# Download content (mount directories for persistent data)
-docker run --rm \
-  -v "$(pwd)/unshackle/downloads:/app/downloads" \
-  -v "$(pwd)/unshackle/cookies:/app/unshackle/cookies" \
-  -v "$(pwd)/unshackle/services:/app/unshackle/services" \
-  -v "$(pwd)/unshackle/WVDs:/app/unshackle/WVDs" \
-  -v "$(pwd)/unshackle/PRDs:/app/unshackle/PRDs" \
-  -v "$(pwd)/unshackle/unshackle.yaml:/app/unshackle.yaml" \
-  ghcr.io/unshackle-dl/unshackle:latest dl SERVICE_NAME CONTENT_ID
-
-# Run interactively for configuration
-docker run --rm -it \
-  -v "$(pwd)/unshackle/cookies:/app/unshackle/cookies" \
-  -v "$(pwd)/unshackle/services:/app/unshackle/services" \
-  -v "$(pwd)/unshackle.yaml:/app/unshackle.yaml" \
-  ghcr.io/unshackle-dl/unshackle:latest cfg
-```
-
-**Alternative: Build locally**
-
-```bash
-# Clone and build your own image
-git clone https://github.com/unshackle-dl/unshackle.git
-cd unshackle
-docker build -t unshackle .
-docker run --rm unshackle env check
 ```
 
 > [!NOTE]
