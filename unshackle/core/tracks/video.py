@@ -116,6 +116,7 @@ class Video(Track):
             class Transfer(Enum):
                 Unspecified = 0
                 BT_709 = 1
+                Unspecified_Image = 2
                 BT_601 = 6
                 BT_2020 = 14
                 BT_2100 = 15
@@ -236,6 +237,8 @@ class Video(Track):
             self.fps = (FPS.parse(str(fps)) or None) if fps else None
         except Exception as e:
             raise ValueError("Expected fps to be a number, float, or a string as numerator/denominator form, " + str(e))
+
+        self.needs_duration_fix = False
 
     def __str__(self) -> str:
         return " | ".join(

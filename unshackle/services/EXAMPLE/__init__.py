@@ -33,6 +33,7 @@ class EXAMPLE(Service):
 
     TITLE_RE = r"^(?:https?://?domain\.com/details/)?(?P<title_id>[^/]+)"
     GEOFENCE = ("US", "UK")
+    NO_SUBTITLES = True
 
     @staticmethod
     @click.command(name="EXAMPLE", short_help="https://domain.com")
@@ -280,6 +281,10 @@ class EXAMPLE(Service):
                     chapters.append(Chapter(timestamp=chapter["start"], name="Credits"))
 
         return chapters
+
+    def get_widevine_service_certificate(self, **_: any) -> str:
+        """Return the Widevine service certificate from config, if available."""
+        return self.config.get("certificate")
 
     def get_playready_license(self, *, challenge: bytes, title: Title_T, track: AnyTrack) -> Optional[bytes]:
         """Retrieve a PlayReady license for a given track."""

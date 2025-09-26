@@ -4,6 +4,7 @@ import base64
 import html
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -13,9 +14,10 @@ from typing import Any, Callable, Optional, Union
 from urllib.parse import urljoin
 from zlib import crc32
 
-import httpx
 import m3u8
 import requests
+from curl_cffi.requests import Response as CurlResponse
+from curl_cffi.requests import Session as CurlSession
 from langcodes import Language, tag_is_valid
 from m3u8 import M3U8
 from pyplayready.cdm import Cdm as PlayReadyCdm
@@ -34,7 +36,7 @@ from unshackle.core.utilities import get_extension, is_close_match, try_ensure_u
 
 
 class HLS:
-    def __init__(self, manifest: M3U8, session: Optional[Union[Session, httpx.Client]] = None):
+    def __init__(self, manifest: M3U8, session: Optional[Union[Session, CurlSession]] = None):
         if not manifest:
             raise ValueError("HLS manifest must be provided.")
         if not isinstance(manifest, M3U8):
@@ -46,7 +48,7 @@ class HLS:
         self.session = session or Session()
 
     @classmethod
-    def from_url(cls, url: str, session: Optional[Union[Session, httpx.Client]] = None, **args: Any) -> HLS:
+    def from_url(cls, url: str, session: Optional[Union[Session, CurlSession]] = None, **args: Any) -> HLS:
         if not url:
             raise requests.URLRequired("HLS manifest URL must be provided.")
         if not isinstance(url, str):
@@ -54,22 +56,22 @@ class HLS:
 
         if not session:
             session = Session()
-        elif not isinstance(session, (Session, httpx.Client)):
-            raise TypeError(f"Expected session to be a {Session} or {httpx.Client}, not {session!r}")
+        elif not isinstance(session, (Session, CurlSession)):
+            raise TypeError(f"Expected session to be a {Session} or {CurlSession}, not {session!r}")
 
         res = session.get(url, **args)
 
-        # Handle both requests and httpx response objects
+        # Handle requests and curl_cffi response objects
         if isinstance(res, requests.Response):
             if not res.ok:
                 raise requests.ConnectionError("Failed to request the M3U(8) document.", response=res)
             content = res.text
-        elif isinstance(res, httpx.Response):
-            if res.status_code >= 400:
+        elif isinstance(res, CurlResponse):
+            if not res.ok:
                 raise requests.ConnectionError("Failed to request the M3U(8) document.", response=res)
             content = res.text
         else:
-            raise TypeError(f"Expected response to be a requests.Response or httpx.Response, not {type(res)}")
+            raise TypeError(f"Expected response to be a requests.Response or curl_cffi.Response, not {type(res)}")
 
         master = m3u8.loads(content, uri=url)
 
@@ -228,7 +230,7 @@ class HLS:
         save_path: Path,
         save_dir: Path,
         progress: partial,
-        session: Optional[Union[Session, httpx.Client]] = None,
+        session: Optional[Union[Session, CurlSession]] = None,
         proxy: Optional[str] = None,
         max_workers: Optional[int] = None,
         license_widevine: Optional[Callable] = None,
@@ -237,15 +239,13 @@ class HLS:
     ) -> None:
         if not session:
             session = Session()
-        elif not isinstance(session, (Session, httpx.Client)):
-            raise TypeError(f"Expected session to be a {Session} or {httpx.Client}, not {session!r}")
+        elif not isinstance(session, (Session, CurlSession)):
+            raise TypeError(f"Expected session to be a {Session} or {CurlSession}, not {session!r}")
 
         if proxy:
             # Handle proxies differently based on session type
             if isinstance(session, Session):
                 session.proxies.update({"all": proxy})
-            elif isinstance(session, httpx.Client):
-                session.proxies = {"http://": proxy, "https://": proxy}
 
         log = logging.getLogger("HLS")
 
@@ -256,13 +256,8 @@ class HLS:
                 log.error(f"Failed to request the invariant M3U8 playlist: {response.status_code}")
                 sys.exit(1)
             playlist_text = response.text
-        elif isinstance(response, httpx.Response):
-            if response.status_code >= 400:
-                log.error(f"Failed to request the invariant M3U8 playlist: {response.status_code}")
-                sys.exit(1)
-            playlist_text = response.text
         else:
-            raise TypeError(f"Expected response to be a requests.Response or httpx.Response, not {type(response)}")
+            raise TypeError(f"Expected response to be a requests.Response or curl_cffi.Response, not {type(response)}")
 
         master = m3u8.loads(playlist_text, uri=track.url)
 
@@ -532,13 +527,9 @@ class HLS:
                         if isinstance(res, requests.Response):
                             res.raise_for_status()
                             init_content = res.content
-                        elif isinstance(res, httpx.Response):
-                            if res.status_code >= 400:
-                                raise requests.HTTPError(f"HTTP Error: {res.status_code}", response=res)
-                            init_content = res.content
                         else:
                             raise TypeError(
-                                f"Expected response to be requests.Response or httpx.Response, not {type(res)}"
+                                f"Expected response to be requests.Response or curl_cffi.Response, not {type(res)}"
                             )
 
                         map_data = (segment.init_section, init_content)
@@ -584,11 +575,24 @@ class HLS:
         if DOWNLOAD_LICENCE_ONLY.is_set():
             return
 
-        if segment_save_dir.exists():
-            segment_save_dir.rmdir()
+        def find_segments_recursively(directory: Path) -> list[Path]:
+            """Find all segment files recursively in any directory structure created by downloaders."""
+            segments = []
+
+            # First check direct files in the directory
+            if directory.exists():
+                segments.extend([x for x in directory.iterdir() if x.is_file()])
+
+                # If no direct files, recursively search subdirectories
+                if not segments:
+                    for subdir in directory.iterdir():
+                        if subdir.is_dir():
+                            segments.extend(find_segments_recursively(subdir))
+
+            return sorted(segments)
 
         # finally merge all the discontinuity save files together to the final path
-        segments_to_merge = [x for x in sorted(save_dir.iterdir()) if x.is_file()]
+        segments_to_merge = find_segments_recursively(save_dir)
         if len(segments_to_merge) == 1:
             shutil.move(segments_to_merge[0], save_path)
         else:
@@ -601,9 +605,16 @@ class HLS:
                         discontinuity_data = discontinuity_file.read_bytes()
                         f.write(discontinuity_data)
                         f.flush()
+                        os.fsync(f.fileno())
                         discontinuity_file.unlink()
 
-        save_dir.rmdir()
+        # Clean up empty segment directory
+        if save_dir.exists() and save_dir.name.endswith("_segments"):
+            try:
+                save_dir.rmdir()
+            except OSError:
+                # Directory might not be empty, try removing recursively
+                shutil.rmtree(save_dir, ignore_errors=True)
 
         progress(downloaded="Downloaded")
 
@@ -613,45 +624,80 @@ class HLS:
     @staticmethod
     def merge_segments(segments: list[Path], save_path: Path) -> int:
         """
-        Concatenate Segments by first demuxing with FFmpeg.
+        Concatenate Segments using FFmpeg concat with binary fallback.
 
         Returns the file size of the merged file.
         """
-        if not binaries.FFMPEG:
-            raise EnvironmentError("FFmpeg executable was not found but is required to merge HLS segments.")
-
-        demuxer_file = segments[0].parent / "ffmpeg_concat_demuxer.txt"
-        demuxer_file.write_text("\n".join([f"file '{segment}'" for segment in segments]))
-
-        subprocess.check_call(
-            [
-                binaries.FFMPEG,
-                "-hide_banner",
-                "-loglevel",
-                "panic",
-                "-f",
-                "concat",
-                "-safe",
-                "0",
-                "-i",
-                demuxer_file,
-                "-map",
-                "0",
-                "-c",
-                "copy",
-                save_path,
-            ]
-        )
-        demuxer_file.unlink()
-
+        # Track segment directories for cleanup
+        segment_dirs = set()
         for segment in segments:
-            segment.unlink()
+            # Track all parent directories that contain segments
+            current_dir = segment.parent
+            while current_dir.name and "_segments" in str(current_dir):
+                segment_dirs.add(current_dir)
+                current_dir = current_dir.parent
 
+        def cleanup_segments_and_dirs():
+            """Clean up segments and directories after successful merge."""
+            for segment in segments:
+                segment.unlink(missing_ok=True)
+            for segment_dir in segment_dirs:
+                if segment_dir.exists():
+                    try:
+                        shutil.rmtree(segment_dir)
+                    except OSError:
+                        pass  # Directory cleanup failed, but merge succeeded
+
+        # Try FFmpeg concat first (preferred method)
+        if binaries.FFMPEG:
+            try:
+                demuxer_file = save_path.parent / f"ffmpeg_concat_demuxer_{save_path.stem}.txt"
+                demuxer_file.write_text("\n".join([f"file '{segment.absolute()}'" for segment in segments]))
+
+                subprocess.check_call(
+                    [
+                        binaries.FFMPEG,
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-f",
+                        "concat",
+                        "-safe",
+                        "0",
+                        "-i",
+                        demuxer_file,
+                        "-map",
+                        "0",
+                        "-c",
+                        "copy",
+                        save_path,
+                    ],
+                    timeout=300,  # 5 minute timeout
+                )
+                demuxer_file.unlink(missing_ok=True)
+                cleanup_segments_and_dirs()
+                return save_path.stat().st_size
+
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+                # FFmpeg failed, clean up demuxer file and fall back to binary concat
+                logging.getLogger("HLS").debug(f"FFmpeg concat failed ({e}), falling back to binary concatenation")
+                demuxer_file.unlink(missing_ok=True)
+                # Remove partial output file if it exists
+                save_path.unlink(missing_ok=True)
+
+        # Fallback: Binary concatenation
+        logging.getLogger("HLS").debug(f"Using binary concatenation for {len(segments)} segments")
+        with open(save_path, "wb") as output_file:
+            for segment in segments:
+                with open(segment, "rb") as segment_file:
+                    output_file.write(segment_file.read())
+
+        cleanup_segments_and_dirs()
         return save_path.stat().st_size
 
     @staticmethod
     def parse_session_data_keys(
-        manifest: M3U8, session: Optional[Union[Session, httpx.Client]] = None
+        manifest: M3U8, session: Optional[Union[Session, CurlSession]] = None
     ) -> list[m3u8.model.Key]:
         """Parse `com.apple.hls.keys` session data and return Key objects."""
         keys: list[m3u8.model.Key] = []
@@ -742,7 +788,8 @@ class HLS:
 
     @staticmethod
     def get_drm(
-        key: Union[m3u8.model.SessionKey, m3u8.model.Key], session: Optional[Union[Session, httpx.Client]] = None
+        key: Union[m3u8.model.SessionKey, m3u8.model.Key],
+        session: Optional[Union[Session, CurlSession]] = None,
     ) -> DRM_T:
         """
         Convert HLS EXT-X-KEY data to an initialized DRM object.
@@ -754,8 +801,8 @@ class HLS:
 
         Raises a NotImplementedError if the key system is not supported.
         """
-        if not isinstance(session, (Session, httpx.Client, type(None))):
-            raise TypeError(f"Expected session to be a {Session} or {httpx.Client}, not {type(session)}")
+        if not isinstance(session, (Session, CurlSession, type(None))):
+            raise TypeError(f"Expected session to be a {Session} or {CurlSession}, not {type(session)}")
         if not session:
             session = Session()
 

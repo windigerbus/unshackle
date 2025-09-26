@@ -233,6 +233,7 @@ class Subtitle(Track):
             try:
                 caption_set = pycaption.WebVTTReader().read(text)
                 Subtitle.merge_same_cues(caption_set)
+                Subtitle.filter_unwanted_cues(caption_set)
                 subtitle_text = pycaption.WebVTTWriter().write(caption_set)
                 self.path.write_text(subtitle_text, encoding="utf8")
             except pycaption.exceptions.CaptionReadSyntaxError:
@@ -241,6 +242,7 @@ class Subtitle(Track):
                 try:
                     caption_set = pycaption.WebVTTReader().read(text)
                     Subtitle.merge_same_cues(caption_set)
+                    Subtitle.filter_unwanted_cues(caption_set)
                     subtitle_text = pycaption.WebVTTWriter().write(caption_set)
                     self.path.write_text(subtitle_text, encoding="utf8")
                 except Exception:
@@ -444,6 +446,8 @@ class Subtitle(Track):
 
         caption_set = self.parse(self.path.read_bytes(), self.codec)
         Subtitle.merge_same_cues(caption_set)
+        if codec == Subtitle.Codec.WebVTT:
+            Subtitle.filter_unwanted_cues(caption_set)
         subtitle_text = writer().write(caption_set)
 
         output_path.write_text(subtitle_text, encoding="utf8")
@@ -520,6 +524,8 @@ class Subtitle(Track):
 
             caption_set = self.parse(self.path.read_bytes(), self.codec)
             Subtitle.merge_same_cues(caption_set)
+            if codec == Subtitle.Codec.WebVTT:
+                Subtitle.filter_unwanted_cues(caption_set)
             subtitle_text = writer().write(caption_set)
 
             output_path.write_text(subtitle_text, encoding="utf8")
@@ -680,6 +686,24 @@ class Subtitle(Track):
                 merged_captions.append(pycaption.base.merge(concurrent_captions))
             if merged_captions:
                 caption_set.set_captions(lang, merged_captions)
+
+    @staticmethod
+    def filter_unwanted_cues(caption_set: pycaption.CaptionSet):
+        """
+        Filter out subtitle cues containing only &nbsp; or whitespace.
+        """
+        for lang in caption_set.get_languages():
+            captions = caption_set.get_captions(lang)
+            filtered_captions = pycaption.CaptionList()
+
+            for caption in captions:
+                text = caption.get_text().strip()
+                if not text or text == "&nbsp;" or all(c in " \t\n\r\xa0" for c in text.replace("&nbsp;", "\xa0")):
+                    continue
+
+                filtered_captions.append(caption)
+
+            caption_set.set_captions(lang, filtered_captions)
 
     @staticmethod
     def merge_segmented_wvtt(data: bytes, period_start: float = 0.0) -> tuple[CaptionList, Optional[str]]:
@@ -846,7 +870,18 @@ class Subtitle(Track):
         elif sdh_method == "filter-subs":
             # Force use of filter-subs
             sub = Subtitles(self.path)
-            sub.filter(rm_fonts=True, rm_ast=True, rm_music=True, rm_effects=True, rm_names=True, rm_author=True)
+            try:
+                sub.filter(rm_fonts=True, rm_ast=True, rm_music=True, rm_effects=True, rm_names=True, rm_author=True)
+            except ValueError as e:
+                if "too many values to unpack" in str(e):
+                    # Retry without name removal if the error is due to multiple colons in time references
+                    # This can happen with lines like "at 10:00 and 2:00"
+                    sub = Subtitles(self.path)
+                    sub.filter(
+                        rm_fonts=True, rm_ast=True, rm_music=True, rm_effects=True, rm_names=False, rm_author=True
+                    )
+                else:
+                    raise
             sub.save()
             return
         elif sdh_method == "auto":
@@ -882,7 +917,18 @@ class Subtitle(Track):
             )
         else:
             sub = Subtitles(self.path)
-            sub.filter(rm_fonts=True, rm_ast=True, rm_music=True, rm_effects=True, rm_names=True, rm_author=True)
+            try:
+                sub.filter(rm_fonts=True, rm_ast=True, rm_music=True, rm_effects=True, rm_names=True, rm_author=True)
+            except ValueError as e:
+                if "too many values to unpack" in str(e):
+                    # Retry without name removal if the error is due to multiple colons in time references
+                    # This can happen with lines like "at 10:00 and 2:00"
+                    sub = Subtitles(self.path)
+                    sub.filter(
+                        rm_fonts=True, rm_ast=True, rm_music=True, rm_effects=True, rm_names=False, rm_author=True
+                    )
+                else:
+                    raise
             sub.save()
 
     def reverse_rtl(self) -> None:

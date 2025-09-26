@@ -56,7 +56,7 @@ class Movie(Title):
         unique_audio_languages = len({x.language.split("-")[0] for x in media_info.audio_tracks if x.language})
 
         # Name (Year)
-        name = str(self).replace("$", "S") + " -" # e.g., Arli$$
+        name = str(self).replace("$", "S")  # e.g., Arli$$
 
         # Resolution
         if primary_video_track:
@@ -75,20 +75,20 @@ class Movie(Title):
                 resolution = int(primary_video_track.width * (9 / 16))
             name += f" {resolution}p"
 
-        # Service
-        # if show_service:
-        #     name += f" {self.service.__name__}"
+            # Service
+            if show_service:
+                name += f" {self.service.__name__}"
 
-        # # 'WEB-DL'
-        # name += " WEB-DL"
+            # 'WEB-DL'
+            name += " WEB-DL"
 
-        # # DUAL
-        # if unique_audio_languages == 2:
-        #     name += " DUAL"
+            # DUAL
+            if unique_audio_languages == 2:
+                name += " DUAL"
 
-        # # MULTi
-        # if unique_audio_languages > 2:
-        #     name += " MULTi"
+            # MULTi
+            if unique_audio_languages > 2:
+                name += " MULTi"
 
         # Audio Codec + Channels (+ feature)
         if primary_audio_track:
@@ -123,8 +123,8 @@ class Movie(Title):
                 name += " HFR"
             name += f" {VIDEO_CODEC_MAP.get(codec, codec)}"
 
-        # if config.tag:
-        #     name += f"-{config.tag}"
+            if config.tag:
+                name += f"-{config.tag}"
 
         return sanitize_filename(name)
 

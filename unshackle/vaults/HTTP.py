@@ -29,7 +29,7 @@ class HTTP(Vault):
             username: Username (required for query mode, ignored for json mode)
             api_mode: "query" for query parameters or "json" for JSON API
         """
-        super().__init__(name)
+        super().__init__(name, no_push)
         self.url = host
         self.password = password
         self.username = username
