@@ -54,8 +54,9 @@ class Netflix(Service):
     Security: UHD@SL3000/L1 FHD@SL3000/L1
     """
     TITLE_RE = [
-        r"^(?:https?://(?:www\.)?netflix\.com(?:/[a-z0-9]{2})?/(?:title/|watch/|.+jbv=))?(?P<id>\d+)",
-        r"^https?://(?:www\.)?unogs\.com/title/(?P<id>\d+)",
+#        r"^(?:https?://(?:www\.)?netflix\.com(?:/[a-z0-9]{2})?/(?:title/|watch/|.+jbv=))?(?P<id>\d+)",
+#        r"^https?://(?:www\.)?unogs\.com/title/(?P<id>\d+)",
+         r"^[0-9]{8}$"
     ]
     ALIASES= ("NF", "Netflix")
     NF_LANG_MAP = {
@@ -190,6 +191,7 @@ class Netflix(Service):
         else:
             if self.high_bitrate:
                 splitted_profiles = self.split_profiles(self.profiles)
+                self.log.info(splitted_profiles)
                 for index, profile_list in enumerate(splitted_profiles):
                     try:
                         self.log.debug(f"Index: {index}. Getting profiles: {profile_list}")
@@ -220,7 +222,7 @@ class Netflix(Service):
             tracks.add(
                 Attachment.from_url(title.data["stills"][0]["url"])
             )
-        
+        self.log.info(tracks)
         return tracks
         
     def split_profiles(self, profiles: List[str]) -> List[List[str]]:
@@ -564,10 +566,13 @@ class Netflix(Service):
     @staticmethod
     def get_original_language(manifest) -> Language:
         for language in manifest["audio_tracks"]:
+            self.log.info(language["languageDescription"]
             if language["languageDescription"].endswith(" [Original]"):
                 return Language.get(language["language"])
         # e.g. get `en` from "A:1:1;2;en;0;|V:2:1;[...]"
-        return Language.get(manifest["defaultTrackOrderList"][0]["mediaId"].split(";")[2])
+        l = Language.get(manifest["defaultTrackOrderList"][0]["mediaId"].split(";")[2])
+        self.log.info(l)
+        return l
 
     def get_widevine_service_certificate(self, *, challenge: bytes, title: Movie | Episode | Song, track: AnyTrack) -> bytes | str:
         return self.config["certificate"]

@@ -612,7 +612,7 @@ class dl:
                 title.tracks.subtitles = []
 
             with console.status("Getting tracks...", spinner="dots"):
-                title.tracks.add(service.get_tracks(title), warn_only=True)
+                title.tracks.add(service.get_tracks(title))
                 title.tracks.chapters = service.get_chapters(title)
 
             # strip SDH subs to non-SDH if no equivalent same-lang non-SDH is available
